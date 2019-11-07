@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "readini.h"
+#include <readini.h>
 
 void use_section(int fd, const  char *section_name, LineUser lu)
 {
