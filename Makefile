@@ -1,5 +1,4 @@
-CFLAGS = -Wall -m64 -ggdb -I. -fPIC
-LFLAGS = ${CFLAGS} -fPIC -shared
+CFLAGS = -Wall -m64 -ggdb -I. -fPIC -shared
 
 CC = cc
 TARGET = libreadini.so
@@ -8,7 +7,7 @@ FNAME = libreadini
 all : ${TARGET}
 
 ${TARGET} : readini.c
-	$(CC) ${LFLAGS} -o ${TARGET} readini.c
+	$(CC) ${CFLAGS} -o ${TARGET} readini.c
 
 clean :
 	rm -f ritest ${TARGET}
