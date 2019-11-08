@@ -65,6 +65,11 @@ void use_sections(const ri_Section* sections)
       show_section(sptr->section_name, sptr->lines);
       sptr = sptr->next;
    }
+
+   printf("Using ri_find_section_value to get something\n");
+   printf("Getting bogus/user : '%s'.\n", ri_find_section_value(sections, "bogus", "user"));
+   printf("Getting bogus/from : '%s'.\n", ri_find_section_value(sections, "bogus", "from"));
+   printf("Getting bogus/password : '%s'.\n", ri_find_section_value(sections, "bogus", "password"));
 }
 
 int main(int argc, char** argv)
