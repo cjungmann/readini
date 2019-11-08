@@ -19,6 +19,7 @@
 #include <assert.h>
 
 #include "readini.h"
+#include "readini_private.h"
 
 /** @brief A more restrictive reckoning of what constitutes a space. */
 int is_space(const char *val)     { return strchr(" \t", *val) != NULL; }
