@@ -1,76 +1,80 @@
-// -*- compile-command: "cc -Wall -Werror -o ritest ritest.c -lreadini" -*-
+// -*- compile-command: "cc -Wall -Werror -ggdb -o ritest ritest.c -lreadini" -*-
 
 #include <stdio.h>
+#include <string.h>  // for strlen()
 #include <readini.h>
 
-void use_section(int fd, const  char *section_name, LineUser lu)
+/**
+ * Called by use_global_section and use_bogus_section for a
+ * formalized method of displaying the section contents.
+ */
+void show_section(const char *section_name, const ri_Line* lines)
 {
-   printf("in ritest, having found a section.\n");
-}
+   const ri_Line* ptr = lines;
+   int cur_tag_length, max_tag_length = 0;
+   char tag_format_buffer[20];
 
-void use_file_simple(int fd)
-{
-   printf("in ritest, having gotten a file.\n");
-   seek_section(fd, "global", use_section, NULL);
-}
-
-void use_iniline(const struct iniline *lines)
-{
-   const struct iniline *ptr = lines;
-
+   printf("[34;1m%s[m\n", section_name);
+   
    while (ptr)
    {
-      printf("[33;1;44m%s[m", ptr->tag);
-      if (ptr->value)
-         printf(" : [34;1;44m%s[m", ptr->value);
-      printf("\n");
+      cur_tag_length = strlen(ptr->tag);
+      if (cur_tag_length > max_tag_length)
+         max_tag_length = cur_tag_length;
 
       ptr = ptr->next;
    }
-}
 
-void use_inifile(const struct inisection *section)
-{
-   const struct inisection *s_ptr = section;
-   const struct iniline *i_ptr;
-   while (s_ptr)
+   sprintf(tag_format_buffer, "  %%%ds", max_tag_length);
+
+   ptr = lines;
+   while (ptr)
    {
-      printf("[34;1m%s[m\n", s_ptr->section_name);
-
-      i_ptr = s_ptr->lines;
-      while (i_ptr)
-      {
-         printf("  %s", i_ptr->tag);
-         if (i_ptr->value)
-            printf(" : %s", i_ptr->value);
-         printf("\n");
+      printf(tag_format_buffer, ptr->tag);
+      if (ptr->value)
+         printf(" : %s", ptr->value);
+      printf("\n");
          
-         i_ptr = i_ptr->next;
-      }
-
-      s_ptr = s_ptr->next;
+      ptr = ptr->next;
    }
+
+   printf("\n");
 }
 
+void use_global_section(const ri_Line* lines) { show_section("global", lines); }
+void use_bogus_section(const ri_Line* lines)  { show_section("bogus", lines); }
 
+/**
+ * @brief Demonstration of how ri_open_section may be used
+ *        for multiple sections with one file descriptor.
+ */
 void use_file_to_read(int fd)
 {
-   read_section(fd, "bogus", use_iniline);
+  ri_open_section(fd, "bogus", use_bogus_section);
+  ri_open_section(fd, "global", use_global_section);
+}
+
+void use_sections(const ri_Section* sections)
+{
+   const ri_Section *sptr = sections;
+
+   printf("Showing contents of configuration file, comments removed.\n");
+
+   while (sptr)
+   {
+      show_section(sptr->section_name, sptr->lines);
+      sptr = sptr->next;
+   }
 }
 
 int main(int argc, char** argv)
 {
-   printf("In ritest main().\n");
-
-   /* // Test fundamental functions */
-   /* cb_open("./demo.ini", use_file_simple); */
-
    // Test service function
-   cb_open("./demo.ini", use_file_to_read);
+   printf("Testing multi-use file descriptor to view sections.\n");
+   ri_open("./demo.ini", use_file_to_read);
 
    printf("Finished with first test.  Now on to test that reads the entire file.\n");
-
-   get_inifile("./demo.ini", use_inifile);
+   ri_open_file("./demo.ini", use_sections);
 
    
    
