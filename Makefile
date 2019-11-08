@@ -6,7 +6,7 @@ FNAME = libreadini
 
 all : ${TARGET}
 
-${TARGET} : readini.c readini.h
+${TARGET} : readini.c readini.h readini_private.h
 	$(CC) ${CFLAGS} -o ${TARGET} readini.c 
 
 clean :
