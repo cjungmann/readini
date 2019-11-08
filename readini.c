@@ -26,6 +26,38 @@ int is_space(const char *val)     { return strchr(" \t", *val) != NULL; }
 /** @brief Identifies a character that cannot be in a tag, thus marking the tag's end. */
 int is_end_tag(const char *val)   { return strchr("#:= \t", *val) != NULL; }
 
+/** @brief Returns TRUE if first character of trimmed line buffer is '['. */
+int line_is_section_type(const char *buffer)
+{
+   return buffer[0] == '[';
+}
+
+/** @brief Reports if '[' and ']' in buffer, without regard to what's between the square braces. */
+int line_contains_section_head(const char *buffer)
+{
+   const char *ptr = "";
+   if (line_is_section_type(buffer))
+   {
+      ptr = buffer;
+      while (*++ptr && *ptr != ']')
+         ;
+   }
+
+   return *ptr == ']';
+}
+
+/** @brief Reports if buffer contains the *section_name* specified section header. */
+int line_is_section(const char *buffer, const char *section_name)
+{
+   int len_name = strlen(section_name);
+   if (line_is_section_type(buffer))
+      return len_name+1 < MAX_CLINE
+         && buffer[len_name+1] == ']'
+         && 0 == strncmp(&buffer[1], section_name, len_name);
+   else
+      return 0;
+}
+
 /**
  * @brief Read character at a time to first newline or EOF.
  */
@@ -42,27 +74,6 @@ void discard_file_chars_to_newline(int fh)
 }
 
 /**
- * @brief Opens a file, invokes callback with file descriptor, then closes file.
- *
- * A simple implementation of my model of resource cleanup: call this function
- * with a callback argument that is invoked when the resources are available.
- * When the callback function returns, the resources are unwound.
- */
-void cb_open(const char *path, FileUser fu)
-{
-   int fh = open(path, O_RDONLY);
-   if (fh == -1)
-   {
-      fprintf(stderr, "Failed to open \"%s\".", path);
-   }
-   else
-   {
-      (*fu)(fh);
-      close(fh);
-   }
-}
-
-/**
  * @brief Scans the buffer to find a tag and value.
  *
  * The line_info parameter is set with pointers to the
@@ -70,11 +81,11 @@ void cb_open(const char *path, FileUser fu)
  * length members with the length of the tag and value
  * substrings.
  */
-int parse_line_info(const char *buffer, struct line_info *li)
+int ri_parse_line_info(const char *buffer, struct ri_line_info *li)
 {
    const char *ptr;
 
-   memset(li, 0, sizeof(struct line_info));
+   memset(li, 0, sizeof(struct ri_line_info));
 
    if (*buffer == '\0')
       return 0;
@@ -226,81 +237,161 @@ int find_section(int fh, const char* section_name)
    return found;
 }
 
-/** @brief Returns TRUE if first character of trimmed line buffer is '['. */
-int line_is_section_type(const char *buffer)
+/**
+ * @brief Works with read_inifile_section_recursive to collect configuration data.
+ */
+void read_inifile_section_lines(struct read_inifile_bundle* bundle)
 {
-   return buffer[0] == '[';
-}
+   struct ri_line_info li;
+   struct ri_line *new_iniline, *root = NULL, *tail = NULL;
+   char *tag, *value;
+   
+   char *buffer = bundle->buffer;
 
-
-int line_contains_section_head(const char *buffer)
-{
-   const char *ptr = "";
-   if (line_is_section_type(buffer))
+   while (read_line(bundle->fh, buffer, MAX_CLINE))
    {
-      ptr = buffer;
-      while (*++ptr && *ptr != ']')
-         ;
+      if (line_is_section_type(buffer))
+      {
+         // Prevent callback-triggering while-loop exit
+         // by returning directly at return from recursion:
+         return read_inifile_section_recursive(bundle);
+      }
+      else if ( ri_parse_line_info(buffer, &li) )
+      {
+         new_iniline = (struct ri_line *)alloca(sizeof(struct ri_line));
+         memset(new_iniline, 0, sizeof(struct ri_line));
+
+         // Set empty tail members to tag/value of the line
+         tag = (char *)alloca(li.len_tag+1);
+         memcpy(tag, li.tag, li.len_tag);
+         tag[li.len_tag] = '\0';
+         new_iniline->tag = tag;
+
+         if (li.len_value)
+         {
+            value = (char*)alloca(li.len_value+1);
+            memcpy(value, li.value, li.len_value);
+            value[li.len_value] = '\0';
+
+            new_iniline->value = value;
+         }
+
+         if (tail)
+         {
+            tail->next = new_iniline;
+            tail = new_iniline;
+         }
+         else
+            bundle->tail->lines = root = tail = new_iniline;
+      }
    }
 
-   return *ptr == ']';
-}
+   // Despite the recursion, we should only arrive here once,
+   // when the configuration file has been completely read.
+   // We'll close the file handle before invoking the callback
+   // to preserve system resources.
+   //
+   // Further, we close the file and set the file descriptor
+   // in *bundle* to -1 so it won't be closed twice.
+   close(bundle->fh);
+   bundle->fh = -1;
 
-/** @brief Returns TRUE if the line buffer begins with [$section_name]. */
-int line_is_section(const char *buffer, const char *section_name)
-{
-   int len_name = strlen(section_name);
-   if (line_is_section_type(buffer))
-      return len_name+1 < MAX_CLINE
-         && buffer[len_name+1] == ']'
-         && 0 == strncmp(&buffer[1], section_name, len_name);
-   else
-      return 0;
+   // Make linked data available to requesting function
+   (*bundle->ifu)(bundle->head);
 }
 
 /**
- * @brief Function for alternate processing of a section, with two callback parameters.
- *
- * Use this function to process a section's lines individually rather than
- * as a group with **read_section**.
+ * When entering this function, the bundle->buffer must contain
+ * the section line, so the it can be called for the next section
+ * header without having to rewind the file.
  */
-int seek_section(int fh, const char* section_name, SectionUser su, LineUser lu)
+void read_inifile_section_recursive(struct read_inifile_bundle* bundle)
 {
-   off_t saved_offset = lseek(fh, SEEK_CUR, 0);
-   char buffer[MAX_CLINE];
-   int found = 0;
+   assert(bundle->buffer[0] == '[');
 
-   if (saved_offset != -1)
+   char *ptr;
+   struct ri_section* new_inisection = NULL;
+   char *buffer = bundle->buffer;
+   char *section_name = NULL;
+   int section_name_length = 0;
+
+   // Find trailing ']' to delimit section name.
+   // Initial increment to skip the leading '[',
+   ptr = buffer;
+   while (*++ptr && *ptr != ']')
+      ;
+
+   if (*ptr)
    {
-      lseek(fh, SEEK_SET, 0);
-
-      while (read_line(fh, buffer, MAX_CLINE))
-      {
-         if (line_is_section(buffer, section_name))
-         {
-            (*su)(fh, section_name, lu);
-            found = 1;
-            break;
-         }
-      }
-
-      lseek(fh, SEEK_SET, saved_offset);
+      section_name_length = ptr - buffer - 1;
+      section_name = (char*)alloca(section_name_length+1);
+      memcpy(section_name, &buffer[1], section_name_length);
+      section_name[section_name_length] = '\0';
    }
 
-   return found;
+   if (section_name)
+   {
+      new_inisection = (struct ri_section*)alloca(sizeof(struct ri_section));
+      memset(new_inisection, 0, sizeof(struct ri_section));
+      new_inisection->section_name = section_name;
+
+      if (bundle->tail)
+      {
+         bundle->tail->next = new_inisection;
+         bundle->tail = new_inisection;
+      }
+      else
+         bundle->tail = bundle->head = new_inisection;
+
+      read_inifile_section_lines(bundle);
+   }
+}
+
+/**
+ * @brief Opens a file, invokes callback with file descriptor, then closes file.
+ *
+ * A simple implementation of my model of resource cleanup: call this function
+ * with a callback argument that is invoked when the resources are available.
+ * When the callback function returns, the resources are unwound.
+ *
+ * @param[in] path         Path to configuration file.
+ * @param[in] cb_file_user Function pointer called with an open file descriptor.
+ */
+void ri_open(const char *path, ri_File_User cb_file_user)
+{
+   int fh = open(path, O_RDONLY);
+   if (fh == -1)
+   {
+      fprintf(stderr, "Failed to open \"%s\".", path);
+   }
+   else
+   {
+      (*cb_file_user)(fh);
+      close(fh);
+   }
 }
 
 /**
  * @brief Primary interface for acquiring the contents of a section.
+ *
+ * This function is used with an open file descriptor to retrieve
+ * the lines of a specific section.  It works with a file descriptor
+ * to support loading multiple sections without closing and opening
+ * the file between section readings.
+
+ * @param fh               File descriptor of an open file.
+ * @param section_name     Name of section to retrieve.
+ * @param cb_lines_browser Callback function that will be called with a
+ *                         pointer to the head of a **ri_line** linked list.
  */
-void read_section(int fh, const char *section_name, InilineUser iu)
+void ri_open_section(int fh, const char *section_name, ri_Lines_Browser cb_lines_browser)
 {
    off_t saved_offset = lseek(fh, SEEK_CUR, 0);
 
    char buffer[MAX_CLINE];
 
-   struct line_info li;
-   struct iniline *new_iniline, *root = NULL, *tail =NULL;
+   struct ri_line_info li;
+   struct ri_line *new_iniline, *root = NULL, *tail =NULL;
 
    char *tag, *value;
 
@@ -310,10 +401,10 @@ void read_section(int fh, const char *section_name, InilineUser iu)
       {
          if (line_is_section_type(buffer))
             break;
-         else if ( parse_line_info(buffer, &li) )
+         else if ( ri_parse_line_info(buffer, &li) )
          {
-            new_iniline = (struct iniline *)alloca(sizeof(struct iniline));
-            memset(new_iniline, 0, sizeof(struct iniline));
+            new_iniline = (struct ri_line *)alloca(sizeof(struct ri_line));
+            memset(new_iniline, 0, sizeof(struct ri_line));
 
             // Set empty tail members to tag/value of the line
             tag = (char *)alloca(li.len_tag+1);
@@ -341,139 +432,16 @@ void read_section(int fh, const char *section_name, InilineUser iu)
       };
    }
 
-   (*iu)(root);
+   (*cb_lines_browser)(root);
    
    lseek(fh, SEEK_SET, saved_offset);
 }
 
-
-
-
-
-/**
- * @brief Works with read_inifile_section_recursive to collect configuration data.
- */
-void read_inifile_section_lines(struct read_inifile_bundle* bundle)
-{
-   struct line_info li;
-   struct iniline *new_iniline, *root = NULL, *tail = NULL;
-   char *tag, *value;
-   
-   char *buffer = bundle->buffer;
-
-   while (read_line(bundle->fh, buffer, MAX_CLINE))
-   {
-      if (line_is_section_type(buffer))
-      {
-         // Prevent callback-triggering while-loop exit
-         // by returning directly at return from recursion:
-         return read_inifile_section_recursive(bundle);
-      }
-      else if ( parse_line_info(buffer, &li) )
-      {
-         new_iniline = (struct iniline *)alloca(sizeof(struct iniline));
-         memset(new_iniline, 0, sizeof(struct iniline));
-
-         // Set empty tail members to tag/value of the line
-         tag = (char *)alloca(li.len_tag+1);
-         memcpy(tag, li.tag, li.len_tag);
-         tag[li.len_tag] = '\0';
-         new_iniline->tag = tag;
-
-         if (li.len_value)
-         {
-            value = (char*)alloca(li.len_value+1);
-            memcpy(value, li.value, li.len_value);
-            value[li.len_value] = '\0';
-
-            new_iniline->value = value;
-         }
-
-         if (tail)
-         {
-            tail->next = new_iniline;
-            tail = new_iniline;
-         }
-         else
-            bundle->tail->lines = root = tail = new_iniline;
-      }
-   }
-
-   // This loop should only terminate
-   (*bundle->ifu)(bundle->head);
-}
-
-/**
- * When entering this function, the bundle->buffer must contain
- * the section line, so the it can be called for the next section
- * header without having to rewind the file.
- */
-void read_inifile_section_recursive(struct read_inifile_bundle* bundle)
-{
-   assert(bundle->buffer[0] == '[');
-
-   char *ptr;
-   struct inisection* new_inisection = NULL;
-   char *buffer = bundle->buffer;
-   char *section_name = NULL;
-   int section_name_length = 0;
-
-   // Find trailing ']' to delimit section name.
-   // Initial increment to skip the leading '[',
-   ptr = buffer;
-   while (*++ptr && *ptr != ']')
-      ;
-
-   if (*ptr)
-   {
-      section_name_length = ptr - buffer - 1;
-      section_name = (char*)alloca(section_name_length+1);
-      memcpy(section_name, &buffer[1], section_name_length);
-      section_name[section_name_length] = '\0';
-   }
-
-   if (section_name)
-   {
-      new_inisection = (struct inisection*)alloca(sizeof(struct inisection));
-      memset(new_inisection, 0, sizeof(struct inisection));
-      new_inisection->section_name = section_name;
-
-      if (bundle->tail)
-      {
-         bundle->tail->next = new_inisection;
-         bundle->tail = new_inisection;
-      }
-      else
-         bundle->tail = bundle->head = new_inisection;
-
-      read_inifile_section_lines(bundle);
-   }
-}
-
-void read_inifile(int fh, IniFileUser ifu)
+void ri_open_file(const char *filepath, ri_Sections_Browser cb_sections_browser)
 {
    char buffer[MAX_CLINE];
-
-   // Initialize the bundle
    struct read_inifile_bundle bundle;
-   memset(&bundle, 0, sizeof(struct read_inifile_bundle));
-   bundle.fh = fh;
-   bundle.buffer = buffer;
-   bundle.ifu = ifu;
 
-   // Find the first section header:
-   while (read_line(fh, buffer, MAX_CLINE))
-   {
-      if (line_contains_section_head(buffer))
-      {
-         read_inifile_section_recursive(&bundle);
-         break;
-      };
-   }
-}
-
-void get_inifile(const char *filepath, IniFileUser ifu)
-{
    int fh = open(filepath, O_RDONLY);
    if (fh == -1)
    {
@@ -481,29 +449,99 @@ void get_inifile(const char *filepath, IniFileUser ifu)
    }
    else
    {
-      read_inifile(fh, ifu);
-      close(fh);
+      // Initialize the bundle
+      memset(&bundle, 0, sizeof(struct read_inifile_bundle));
+      bundle.fh = fh;
+      bundle.buffer = buffer;
+      bundle.ifu = cb_sections_browser;
+
+      // Read lines until the first section, beginning work if one is found
+      while (read_line(fh, buffer, MAX_CLINE))
+      {
+         if (line_contains_section_head(buffer))
+         {
+            read_inifile_section_recursive(&bundle);
+            break;
+         };
+      }
+
+      // Close file if not already closed:
+      if (bundle.fh != -1)
+         close(bundle.fh);
    }
 }
 
-
 /**
  * @brief Return value string associated with a tag name.
+ *
+ * Scans a linked list of lines info for a line whose tag
+ * value matches the *tag_name* parameter.
+ *
+ * @param lines_head Pointer to first node of a linked list
+ *                   of lines info.
+ * @param tag_name   Name of tag to match in the linked lines
+ *                   list.
  *
  * @return Pointer to value string if tag is found and it
  *         has a value.  Nonexistent tags and empty found
  *         tags will return NULL;
  */
-const char* find_value(const struct iniline *il, const char *tag)
+const char* ri_find_value(const struct ri_line* lines_head,
+                          const char* tag_name)
 {
-   const struct iniline *ptr = il;
+   const struct ri_line *ptr = lines_head;
 
    while (ptr)
    {
-      if (0 == strcmp(tag, ptr->tag))
+      if (0 == strcmp(ptr->tag, tag_name))
          return ptr->value;
 
       ptr = ptr->next;
+   }
+
+   return NULL;
+}
+
+/**
+ * @brief Return value string associated with a tag name in the
+ *        named section.
+ *
+ * Scans the linked list of sections (provided by a call to
+ * the *ri_open_file* function) for a section whose name
+ * matches the *section_name* parameter, then scans the lines
+ * in a matched section for a line whose tag value matches
+ * the *tag_name* parameter.
+ *
+ * @param lines_head Pointer to first node of a linked list
+ *                   of lines info.
+ * @param tag_name   Name of tag to match in the linked lines
+ *                   list.
+ *
+ * @return Pointer to value string if tag is found and it
+ *         has a value.  Nonexistent tags and empty found
+ *         tags will return NULL;
+ */
+const char* ri_find_section_value(const ri_Section* sections_head,
+                                  const char* section_name,
+                                  const char* tag_name)
+{
+   const ri_Line* lptr;
+   const ri_Section* sptr = sections_head;
+   while (sptr)
+   {
+      if (0 == strcmp(sptr->section_name, section_name))
+      {
+         lptr = sptr->lines;
+         while (lptr)
+         {
+            if (0 == strcmp(lptr->tag, tag_name))
+               return lptr->value;
+
+            lptr = lptr->next;
+         }
+      }
+
+      sptr = sptr->next;
    }
 
    return NULL;
