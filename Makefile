@@ -6,8 +6,8 @@ FNAME = libreadini
 
 all : ${TARGET}
 
-${TARGET} : readini.c
-	$(CC) ${CFLAGS} -o ${TARGET} readini.c
+${TARGET} : readini.c readini.h
+	$(CC) ${CFLAGS} -o ${TARGET} readini.c 
 
 clean :
 	rm -f ritest ${TARGET}
