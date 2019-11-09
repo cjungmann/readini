@@ -100,12 +100,12 @@ int ri_parse_line_info(const char *buffer, struct ri_line_info *li)
    li->tag = buffer;
    li->len_tag = ptr - buffer;
 
-   // move past spaces and/or operators to find value:
-   while (*++ptr && is_end_tag(ptr))
-      ;
-
    if (*ptr)
    {
+      // move past spaces and/or operators to find value:
+      while (*++ptr && is_end_tag(ptr))
+         ;
+
       li->value = ptr;
 
       // Find the end of the value
@@ -249,8 +249,11 @@ void read_inifile_section_lines(struct read_inifile_bundle* bundle)
    
    char *buffer = bundle->buffer;
 
+
    while (read_line(bundle->fh, buffer, MAX_CLINE))
    {
+      memset(&li, 0, sizeof(li));
+
       if (line_is_section_type(buffer))
       {
          // Prevent callback-triggering while-loop exit
@@ -357,8 +360,9 @@ void read_inifile_section_recursive(struct read_inifile_bundle* bundle)
  *
  * @param[in] path         Path to configuration file.
  * @param[in] cb_file_user Function pointer called with an open file descriptor.
+ * @param[in] data         Castable void pointer to custom application data.
  */
-void ri_open(const char *path, ri_File_User cb_file_user)
+void ri_open(const char *path, ri_File_User cb_file_user, void* data)
 {
    int fh = open(path, O_RDONLY);
    if (fh == -1)
@@ -367,7 +371,7 @@ void ri_open(const char *path, ri_File_User cb_file_user)
    }
    else
    {
-      (*cb_file_user)(fh);
+      (*cb_file_user)(fh, data);
       close(fh);
    }
 }
@@ -384,8 +388,9 @@ void ri_open(const char *path, ri_File_User cb_file_user)
  * @param section_name     Name of section to retrieve.
  * @param cb_lines_browser Callback function that will be called with a
  *                         pointer to the head of a **ri_line** linked list.
+ * @param[in] data         Castable void pointer to custom application data.
  */
-void ri_open_section(int fh, const char *section_name, ri_Lines_Browser cb_lines_browser)
+void ri_open_section(int fh, const char *section_name, ri_Lines_Browser cb_lines_browser, void* data)
 {
    off_t saved_offset = lseek(fh, SEEK_CUR, 0);
 
@@ -433,43 +438,9 @@ void ri_open_section(int fh, const char *section_name, ri_Lines_Browser cb_lines
       };
    }
 
-   (*cb_lines_browser)(root);
+   (*cb_lines_browser)(fh, root, data);
    
    lseek(fh, SEEK_SET, saved_offset);
-}
-
-void ri_open_file(const char *filepath, ri_Sections_Browser cb_sections_browser)
-{
-   char buffer[MAX_CLINE];
-   struct read_inifile_bundle bundle;
-
-   int fh = open(filepath, O_RDONLY);
-   if (fh == -1)
-   {
-      fprintf(stderr, "Failed to open \"%s\".", filepath);
-   }
-   else
-   {
-      // Initialize the bundle
-      memset(&bundle, 0, sizeof(struct read_inifile_bundle));
-      bundle.fh = fh;
-      bundle.buffer = buffer;
-      bundle.ifu = cb_sections_browser;
-
-      // Read lines until the first section, beginning work if one is found
-      while (read_line(fh, buffer, MAX_CLINE))
-      {
-         if (line_contains_section_head(buffer))
-         {
-            read_inifile_section_recursive(&bundle);
-            break;
-         };
-      }
-
-      // Close file if not already closed:
-      if (bundle.fh != -1)
-         close(bundle.fh);
-   }
 }
 
 /**
@@ -501,6 +472,67 @@ const char* ri_find_value(const struct ri_line* lines_head,
    }
 
    return NULL;
+}
+
+/**
+ * @brief Reads an entire configuration file into a linked list.
+ *
+ * Opens and reads the configuration file into a linked list of
+ * sections, leaving out the comments and empty lines.
+ *
+ * @param filepath            Path to the configuration file.
+ * @param cb_sections_browser Pointer to function that will consume the
+ *                            sections linked list.  **Do not** quote
+ *                            the function name.  See example below.
+ *
+ * @code
+ * void section_browser(const ri_Section* sections)
+ * {
+ *    const char* user = ri_find_section_value(sections, "bogus", "user");
+ *    const char* pword = ri_find_section_value(sections, "bogus", "password");
+ * }
+ *
+ * int main(int argc, char** argv)
+ * {
+ *    // Pass function pointer by naming the function.
+ *    // Do not quote the function name.  You want its address.
+ *    ri_open_file("~/.mymail.conf", section_browser);
+ * }
+ * @endcode
+ *
+ */
+void ri_read_file(const char *filepath, ri_Sections_Browser cb_sections_browser)
+{
+   char buffer[MAX_CLINE];
+   struct read_inifile_bundle bundle;
+
+   int fh = open(filepath, O_RDONLY);
+   if (fh == -1)
+   {
+      fprintf(stderr, "Failed to open \"%s\".", filepath);
+   }
+   else
+   {
+      // Initialize the bundle
+      memset(&bundle, 0, sizeof(struct read_inifile_bundle));
+      bundle.fh = fh;
+      bundle.buffer = buffer;
+      bundle.ifu = cb_sections_browser;
+
+      // Read lines until the first section, beginning work if one is found
+      while (read_line(fh, buffer, MAX_CLINE))
+      {
+         if (line_contains_section_head(buffer))
+         {
+            read_inifile_section_recursive(&bundle);
+            break;
+         };
+      }
+
+      // Close file if not already closed:
+      if (bundle.fh != -1)
+         close(bundle.fh);
+   }
 }
 
 /**
