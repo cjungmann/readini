@@ -41,19 +41,11 @@ void show_section(const char *section_name, const ri_Line* lines)
    printf("\n");
 }
 
-void use_global_section(const ri_Line* lines) { show_section("global", lines); }
-void use_bogus_section(const ri_Line* lines)  { show_section("bogus", lines); }
+/** ********************************
+ * Demonstration of Simplest Usage *
+ **********************************/
 
-/**
- * @brief Demonstration of how ri_open_section may be used
- *        for multiple sections with one file descriptor.
- */
-void use_file_to_read(int fd)
-{
-  ri_open_section(fd, "bogus", use_bogus_section);
-  ri_open_section(fd, "global", use_global_section);
-}
-
+/** @brief Callback function for ri_read_file(), called from main() **/
 void use_sections(const ri_Section* sections)
 {
    const ri_Section *sptr = sections;
@@ -66,22 +58,88 @@ void use_sections(const ri_Section* sections)
       sptr = sptr->next;
    }
 
+   printf("\n\n[32;1mWithin full-read pattern, testing value acquisition.\n[m");
+
    printf("Using ri_find_section_value to get something\n");
    printf("Getting bogus/user : '%s'.\n", ri_find_section_value(sections, "bogus", "user"));
    printf("Getting bogus/from : '%s'.\n", ri_find_section_value(sections, "bogus", "from"));
    printf("Getting bogus/password : '%s'.\n", ri_find_section_value(sections, "bogus", "password"));
 }
 
+/** **********************************
+ * Demonstration of By-Section Usage *
+ ************************************/
+
+// Structure passed in void* parameter for use_file_to_read(), use_global() and use_user()
+struct payload
+{
+   const ri_Line *global;
+   const char *user;
+};
+
+
+void use_user_account(int fd, const ri_Line* lines, void* data)
+{
+   // Save the lines to the data structure to be used by the next callback:
+   struct payload* pl = (struct payload*)data;
+
+   // (Optional) Make lists aliases to identify contents
+   const ri_Line* global = pl->global; 
+   const ri_Line* user = lines;
+
+   // We don't have to test this because we wouldn't
+   // be here if global didn't include *default-account*.
+   const char* account_name = ri_find_value(global, "default-account");
+
+   // Now you can access both the content from [global] and the
+   // user account indicated in the [global] section
+
+   printf("Section [global] contents.\n");
+   show_section("global", global);
+
+   printf("Default account contents.\n");
+   show_section(account_name, user);
+}
+
+void use_global_section(int fd, const ri_Line* lines, void* data)
+{
+   // Save the lines to the data structure to be used by the next callback:
+   struct payload* pl = (struct payload*)data;
+   pl->global = lines;
+
+   const char *account_name = ri_find_value(pl->global, "default-account");
+   if (account_name)
+   {
+      // Pass the parameter, which is the expected type:
+      ri_open_section(fd, account_name, use_user_account, data);
+   }
+}
+
+/**
+ * @brief Demonstration of how ri_open_section may be used
+ *        for multiple sections with one file descriptor.
+ */
+void use_file_to_read(int fd, void* data)
+{
+   struct payload pl = { NULL, NULL };
+
+   // We don't need to interpret the data here, just pass it on
+   ri_open_section(fd, "global", use_global_section, (void*)&pl);
+}
+
+
+
+
+
 int main(int argc, char** argv)
 {
+   printf("[32;1mTesting recommended full-read configuration file pattern.\n[m");
+   ri_read_file("./demo.ini", use_sections);
+
    // Test service function
-   printf("Testing multi-use file descriptor to view sections.\n");
-   ri_open("./demo.ini", use_file_to_read);
-
-   printf("Finished with first test.  Now on to test that reads the entire file.\n");
-   ri_open_file("./demo.ini", use_sections);
-
-   
+   printf("\n\n[32;1mTesting alternate sparse section reading pattern.\n[m");
+   ri_open("./demo.ini", use_file_to_read, NULL);
    
    return 0;
 }
+
