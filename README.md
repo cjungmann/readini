@@ -13,6 +13,78 @@ want to know if it fits your needs.  Therefore, I'll show you
 how it works first.  If you like what you see, look further down
 for instructions about how to set up the library.
 
+### Easiest Method
+
+The fundamental processing is done with two functions:
+
+- **ri_read_file** reads the entire configuration file and makes
+  its contents available in a linked list.
+- **ri_find_section_value** scans the linked section list for
+  the appropriate line, returning the value associated with the
+  tag.
+
+~~~c
+#include <stdio.h>
+#include <readini.h>
+
+void use_sections(const ri_Section* sections)
+{
+   const char *user = ri_find_section_value(sections, "bogus", "user");
+   const char *password = ri_find_section_value(sections, "bogus", "password");
+}
+
+int main(int argc, char** argv)
+{
+   ri_read_file("./mail.conf" use_sections);
+   return 0;
+}
+~~~
+
+### Slightly-harder Method
+
+For long configuration files from which a small amount of data
+is needed, it may be more efficient to open the file and read
+only the necessary sections.  In that case, the following three
+functions can be used:
+
+- **ri_open** to open the file.
+- **ri_open_section** returns a linked-list of lines in a
+  named section.
+- **ri_find_value** is a simple function that scans the
+  linked list for a matching tag and returning the associated
+  value.
+
+~~~c
+
+void read_global(const ri_Line* lines)
+{
+   
+}
+
+void use_file(int fh)
+{
+   ri_open_section(fh, "global", read_global);
+}
+
+int main(int argc, char** argv)
+{
+   ri_open("./mail.conf", use_file);
+   return 0;
+}
+~~~
+
+### Life-time of Linked Lists
+
+For any function that returns a linked list, (**ri_open_section**
+and **ri_read_file**), the linked list remains in memory until
+the callback function returns.  That means that values returned
+from functions **ri_find_value** and **ri_find_section_value**
+are valid until the callback function returns.
+
+The linked lists are implemented in stack memory, so the contents
+are likely to be immediately corrupted by continued execution of
+your program.
+
 ### Configuration File Format
 
 The configuration file will contain sections indicated by a
@@ -24,8 +96,6 @@ The tag is string without spaces.  If the tag is assigned a
 value, it is followed by a second string, separated by any
 combination of spaces, colons or equal signs.  In practice,
 you'll select one separator format.
-
-
 
 ## Compile and Install
 
@@ -79,23 +149,6 @@ to read a sample configuration file, **demo.ini**.  You
 can look at **ritest.c** for hints on how to use the library,
 and **demo.ini** for an example of what variations of lines
 can be read.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 ## Purpose of Project
