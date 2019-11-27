@@ -1,3 +1,5 @@
+#ifndef READINI_H
+#define READINI_H
 
 /**
  * Structure for node of linked list of line contents.
@@ -43,3 +45,4 @@ const char* ri_find_section_value(const ri_Section* sections_head,
                                   const char* section_name,
                                   const char* tag_name);
 
+#endif
