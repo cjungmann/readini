@@ -56,19 +56,36 @@ functions can be used:
 
 ~~~c
 
-void read_global(const ri_Line* lines)
+struct rdata
 {
-   
+   const ri_Line *global;
+   const ri_Line *account;
+};
+
+void read_account(int fh, const ri_Line* lines, void* data)
+{
+   struct rdata *status = (struct rdata*)data;
+   status->account = lines;
+
+   // Use the global and account settings to do your work.
 }
 
-void use_file(int fh)
+void read_global(int fh, const ri_Line* lines, void* data)
 {
-   ri_open_section(fh, "global", read_global);
+   struct rdata status = { lines, NULL };
+   const char *acct_name = ri_find_value(lines, "default-account");
+   if (acct_name)
+      ri_open_section(fh, acct_name, read_account, (void*)&status);
+}
+
+void use_file(int fh, void* data)
+{
+   ri_open_section(fh, "global", read_global, NULL);
 }
 
 int main(int argc, char** argv)
 {
-   ri_open("./mail.conf", use_file);
+   ri_open("./mail.conf", use_file, NULL);
    return 0;
 }
 ~~~
