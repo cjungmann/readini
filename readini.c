@@ -301,7 +301,7 @@ void read_inifile_section_lines(struct read_inifile_bundle* bundle)
    bundle->fh = -1;
 
    // Make linked data available to requesting function
-   (*bundle->ifu)(bundle->head);
+   (*bundle->ifu)(bundle->head, bundle->data);
 }
 
 /**
@@ -484,6 +484,9 @@ const char* ri_find_value(const struct ri_line* lines_head,
  * @param cb_sections_browser Pointer to function that will consume the
  *                            sections linked list.  **Do not** quote
  *                            the function name.  See example below.
+ * @param data                This parameter value will be passed back
+ *                            to the calling process and can be recast
+ *                            as appropriate.
  *
  * @code
  * void section_browser(const ri_Section* sections)
@@ -501,7 +504,7 @@ const char* ri_find_value(const struct ri_line* lines_head,
  * @endcode
  *
  */
-void ri_read_file(const char *filepath, ri_Sections_Browser cb_sections_browser)
+void ri_read_file(const char *filepath, ri_Sections_Browser cb_sections_browser, void *data)
 {
    char buffer[MAX_CLINE];
    struct read_inifile_bundle bundle;
@@ -518,6 +521,7 @@ void ri_read_file(const char *filepath, ri_Sections_Browser cb_sections_browser)
       bundle.fh = fh;
       bundle.buffer = buffer;
       bundle.ifu = cb_sections_browser;
+      bundle.data = data;
 
       // Read lines until the first section, beginning work if one is found
       while (read_line(fh, buffer, MAX_CLINE))

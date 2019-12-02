@@ -25,6 +25,7 @@ typedef struct read_inifile_bundle
    ri_Section *head;
    ri_Section *tail;
    ri_Sections_Browser ifu;
+   void *data;
    int fh;
 } Bundle;
 

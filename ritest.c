@@ -46,7 +46,7 @@ void show_section(const char *section_name, const ri_Line* lines)
  **********************************/
 
 /** @brief Callback function for ri_read_file(), called from main() **/
-void use_sections(const ri_Section* sections)
+void use_sections(const ri_Section* sections, void *data)
 {
    const ri_Section *sptr = sections;
 
@@ -134,7 +134,7 @@ void use_file_to_read(int fd, void* data)
 int main(int argc, char** argv)
 {
    printf("[32;1mTesting recommended full-read configuration file pattern.\n[m");
-   ri_read_file("./demo.ini", use_sections);
+   ri_read_file("./demo.ini", use_sections, NULL);
 
    // Test service function
    printf("\n\n[32;1mTesting alternate sparse section reading pattern.\n[m");

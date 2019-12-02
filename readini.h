@@ -26,7 +26,7 @@ typedef struct ri_section
  */
 typedef void (*ri_File_User)(int fh, void* data);
 typedef void (*ri_Lines_Browser)(int fh, const ri_Line* lines, void* data);
-typedef void (*ri_Sections_Browser)(const ri_Section* section);
+typedef void (*ri_Sections_Browser)(const ri_Section* section, void* data);
 
 /**
  * The three following functions offer extra control.  Open and
@@ -39,7 +39,7 @@ const char* ri_find_value(const ri_Line* lines_head,
                           const char* tag_name);
 
 /** Simplest access: open file, fully-read it, then query the contents. **/
-void ri_read_file(const char *filepath, ri_Sections_Browser cb_sections_browser);
+void ri_read_file(const char *filepath, ri_Sections_Browser cb_sections_browser, void *data);
 
 const char* ri_find_section_value(const ri_Section* sections_head,
                                   const char* section_name,
