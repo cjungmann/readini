@@ -475,6 +475,29 @@ const char* ri_find_value(const struct ri_line* lines_head,
 }
 
 /**
+ * @brief Retrieve a named section in order to scan its contents.
+ *
+ * Note that scanning sections can only find sections that are or
+ * follow the **root** section.  This is because the sections are
+ * single-link chains that do not know which or whether another
+ * section is pointing at it.
+ */
+const ri_Section* ri_get_section(const ri_Section* root, const char *name)
+{
+   const ri_Section* ptr = root;
+   while (ptr)
+   {
+      if (0 == strcmp(ptr->section_name, name))
+         return ptr;
+      else
+         ptr = ptr->next;
+   }
+
+   return NULL;
+}
+
+
+/**
  * @brief Reads an entire configuration file into a linked list.
  *
  * Opens and reads the configuration file into a linked list of

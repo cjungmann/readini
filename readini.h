@@ -38,6 +38,8 @@ void ri_open_section(int fh, const char *section_name, ri_Lines_Browser cb_lines
 const char* ri_find_value(const ri_Line* lines_head,
                           const char* tag_name);
 
+const ri_Section* ri_get_section(const ri_Section* root, const char *name);
+
 /** Simplest access: open file, fully-read it, then query the contents. **/
 void ri_read_file(const char *filepath, ri_Sections_Browser cb_sections_browser, void *data);
 
