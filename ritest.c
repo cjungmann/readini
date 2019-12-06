@@ -64,6 +64,19 @@ void use_sections(const ri_Section* sections, void *data)
    printf("Getting bogus/user : '%s'.\n", ri_find_section_value(sections, "bogus", "user"));
    printf("Getting bogus/from : '%s'.\n", ri_find_section_value(sections, "bogus", "from"));
    printf("Getting bogus/password : '%s'.\n", ri_find_section_value(sections, "bogus", "password"));
+
+   printf("\n\n[32;1mTesting ri_get_section() on \"fake\" section.[m\n");
+   sptr = ri_get_section(sections, "fake");
+   if (sptr)
+   {
+      printf("Found \"fake\" section.  About to iterate through its contents.\n");
+      const ri_Line *line = sptr->lines;
+      while (line)
+      {
+         printf("tag \"%s\" is \"%s\"\n", line->tag, line->value);
+         line = line->next;
+      }
+   }
 }
 
 /** **********************************
